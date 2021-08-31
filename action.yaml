@@ -1,0 +1,66 @@
+name: 'Build and Push to GCR'
+description: 'Runs tests of code, build image and push to gcr'
+inputs:
+  gcp-project-id:  
+    description: 'Name of the project on google cloud platform'
+    required: true
+  gcp-sa-key:
+    description: 'A service account with access to the project'
+    required: true
+  gcr-key:
+    description: 'A service account with access to the project'
+    required: true
+  app-name: 
+    description: 'Name of the application, this will be the same name of the image that is going to be built and pushed to gcr'
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.9
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 pytest
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      shell: bash
+
+    - name: Lint with flake8
+      run: |
+        # stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      shell: bash
+
+    - name: Test with pytest
+      run: |
+        pytest
+      shell: bash
+
+    - name: Set string for tag
+      id: docker-tag
+      run: |
+        _GIT_SHORT_SHA=$(echo $GITHUB_SHA | cut -c1-7)
+        _DOCKER_TAG=$(date +'%y%m%d')-$_GIT_SHORT_SHA
+        echo "::set-output name=tag::$_DOCKER_TAG"        
+      shell: bash  
+      
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@master
+      with:
+        project_id: ${{ inputs.gcp-project-id }}
+        service_account_key: ${{ inputs.gcp-sa-key}}
+        export_default_credentials: true
+
+    - name: Build and Push to GCR
+      uses: zemuldo/docker-build-push@master
+      env:
+        GCLOUD_PROJECT_ID: ${{ inputs.gcp-project-id }}
+        GCLOUD_AUTH: ${{ inputs.gcr-key }}
+        REGISTRY_URL: "gcr.io"
+      with:
+       image_name: ${{ inputs.app-name }}
+       image_tag: ${{ steps.docker-tag.outputs.tag }}
